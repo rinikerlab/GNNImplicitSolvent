@@ -1,0 +1,17 @@
+name: implicitml
+channels:
+  - pyg
+  - conda-forge
+  - defaults
+dependencies:
+  - pyg
+  - openmm-torch
+  - mdtraj
+  - pdbfixer
+  - pyemma
+  - numba
+  - seaborn
+  - ipython
+  - nglview
+  - scikit-image
+  - apbs
