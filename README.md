@@ -1,5 +1,8 @@
-# implicitML
+# GNNImplicitSolvent
 
+## Publications
+
+J. Chem. Phys. 158, 204101 (2023), DOI: [https://doi.org/10.1063/5.0147027](https://doi.org/10.1063/5.0147027)
 
 ## Abstract
 Molecular dynamics (MD) simulations enable the study of the motion of small and large (bio)molecules and the estimation of their conformational ensembles. The description of the environment (solvent) has thereby a large impact. Implicit solvent representations are efficient but in many cases not accurate enough (especially for polar solvents such as water). More accurate but also computationally more expensive is the explicit treatment of the solvent molecules. Recently, machine learning (ML) has been proposed to bridge the gap and simulate in an implicit manner explicit solvation effects. However, the current approaches rely on prior knowledge of the entire conformational space, limiting their application in practice. Here, we introduce a graph neural network (GNN) based implicit solvent that is capable of describing explicit solvent effects for peptides with different composition than contained in the training set. 
