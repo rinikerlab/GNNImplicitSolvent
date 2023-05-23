@@ -428,3 +428,163 @@ class GNN3_all_swish_GBNeck_trainable_dif_graphs_corr_run(GNN3_all_swish_multipl
         edge_attributes = distances.unsqueeze(1)
 
         return None, edge_index, edge_attributes
+
+class GNN3_all_swish_multiple_peptides_GBNeck_trainable_dif_graphs_corr_with_SA(GNN_GBNeck_2,GNN_Grapher_2):
+
+    def __init__(self,fraction=0.5,radius=0.4, max_num_neighbors=32, parameters=None, device=None, jittable=False):
+
+        gbneck_radius = 10.0
+        self._gnn_radius = radius
+        GNN_GBNeck_2.__init__(self,radius=gbneck_radius, max_num_neighbors=max_num_neighbors, parameters=parameters, device=device, jittable=jittable)
+        GNN_Grapher_2.__init__(self,radius=radius, max_num_neighbors=max_num_neighbors)
+
+        self._fraction = fraction
+        if self._jittable:
+            self.interaction1 = IN_layer_all_swish_2pass(3 + 3, 128).jittable()
+            self.interaction2 = IN_layer_all_swish_2pass(128 + 128, 128).jittable()
+            self.interaction3 = IN_layer_all_swish_2pass(128 + 128, 1).jittable()
+        else:
+            self.interaction1 = IN_layer_all_swish_2pass(3 + 3, 128)
+            self.interaction2 = IN_layer_all_swish_2pass(128 + 128, 128)
+            self.interaction3 = IN_layer_all_swish_2pass(128 + 128, 1)
+
+        self._silu = torch.nn.SiLU()
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, data):
+        data.pos = data.pos.clone().detach().requires_grad_(True)
+        # Build Graph
+        _, edge_index, edge_attributes = self.build_graph(data)
+        _, gnn_edge_index, gnn_edge_attributes = self.build_gnn_graph(data)
+
+        x = data.atom_features
+        # Do message passing
+        Bc = self.aggregate_information(x=x, edge_index=edge_index, edge_attributes=edge_attributes)  # B and charges
+
+        # ADD small correction
+        Bcn = torch.concat((Bc,x[:,1].unsqueeze(1)),dim=1)
+        Bcn = self.interaction1(edge_index=gnn_edge_index,x=Bcn,edge_attributes=gnn_edge_attributes)
+        Bcn = self._silu(Bcn)
+        Bcn = self.interaction2(edge_index=gnn_edge_index,x=Bcn,edge_attributes=gnn_edge_attributes)
+        Bcn = self._silu(Bcn)
+        Bcn = self.interaction3(edge_index=gnn_edge_index,x=Bcn,edge_attributes=gnn_edge_attributes)
+
+        # Scale the GBNeck born radii with plus minus 50%
+        Bcn = Bc[:,0].unsqueeze(1) * (self._fraction + self.sigmoid(Bcn)*(1-self._fraction)*2)
+
+        # Calculate SA term
+        offset = 0.0195141
+        radius = (x[:,1] + offset).unsqueeze(1)
+        sa_energies = 28.3919551*(radius+0.14)**2*(radius/Bcn)**6
+
+        # get 'Born' radius with charge
+        Bc = torch.concat((Bcn,Bc[:,1].unsqueeze(1)),dim=1)
+
+        energies = self.calculate_energies(x=Bc, edge_index=edge_index, edge_attributes=edge_attributes)
+
+        # Add SA term
+        energies = energies + sa_energies
+
+        # Return prediction and Gradients with respect to data
+        gradients = torch.autograd.grad(energies.sum(), inputs=data.pos, create_graph=True)[0]
+        forces = -1 * gradients
+        if self._nobatch:
+            energy = energies.sum()
+            energy = energy.unsqueeze(0)
+            energy = energy.unsqueeze(0)
+        else:
+            energy = torch.empty((torch.max(data.batch) + 1, 1), device=self._device)
+            for batch in data.batch.unique():
+                energy[batch] = energies[torch.where(data.batch == batch)].sum()
+
+        return energy, forces
+    
+class GNN3_all_swish_GBNeck_trainable_dif_graphs_corr_with_SA_run(GNN3_all_swish_multiple_peptides_GBNeck_trainable_dif_graphs_corr_with_SA,_GNN_fix_cuda):
+    
+    def __init__(self,fraction=0.5,radius=0.4, max_num_neighbors=32, parameters=None, device=None, jittable=False):
+
+        gbneck_radius = 10.0
+        self._gnn_radius = radius
+        GNN_GBNeck_2.__init__(self,radius=gbneck_radius, max_num_neighbors=max_num_neighbors, parameters=parameters, device=device, jittable=jittable)
+        GNN_Grapher_2.__init__(self,radius=radius, max_num_neighbors=max_num_neighbors)
+
+        self._fraction = fraction
+        if self._jittable:
+            self.interaction1 = IN_layer_all_swish_2pass(3 + 3, 128,device=device).jittable()
+            self.interaction2 = IN_layer_all_swish_2pass(128 + 128, 128,device=device).jittable()
+            self.interaction3 = IN_layer_all_swish_2pass(128 + 128, 1,device=device).jittable()
+        else:
+            self.interaction1 = IN_layer_all_swish_2pass(3 + 3, 128,device=device)
+            self.interaction2 = IN_layer_all_swish_2pass(128 + 128, 128,device=device)
+            self.interaction3 = IN_layer_all_swish_2pass(128 + 128, 1,device=device)
+
+        self._silu = torch.nn.SiLU()
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, positions):
+        positions = positions.to(dtype=torch.float,device=self._device)
+
+        # Build Graph
+        _, edge_index, edge_attributes = self.build_graph(positions)
+        _, gnn_edge_index, gnn_edge_attributes = self.build_gnn_graph(positions)
+
+        # Get atom features
+        x = self._gbparameters
+
+        # Do message passing
+        Bc = self.aggregate_information(x=x, edge_index=edge_index, edge_attributes=edge_attributes)  # B and charges
+
+        # ADD small correction
+        Bcn = torch.concat((Bc,x[:,1].unsqueeze(1)),dim=1)
+        Bcn = self.interaction1(edge_index=gnn_edge_index,x=Bcn,edge_attributes=gnn_edge_attributes)
+        Bcn = self._silu(Bcn)
+        Bcn = self.interaction2(edge_index=gnn_edge_index,x=Bcn,edge_attributes=gnn_edge_attributes)
+        Bcn = self._silu(Bcn)
+        Bcn = self.interaction3(edge_index=gnn_edge_index,x=Bcn,edge_attributes=gnn_edge_attributes)
+
+        # Scale the GBNeck born radii with plus minus 50%
+        Bcn = Bc[:,0].unsqueeze(1) * (self._fraction + self.sigmoid(Bcn)*(1-self._fraction)*2)
+
+        # Calculate SA term
+        offset = 0.0195141
+        radius = (x[:,1] + offset).unsqueeze(1)
+        sa_energies = 28.3919551*(radius+0.14)**2*(radius/Bcn)**6
+
+        # get 'Born' radius with charge
+        Bc = torch.concat((Bcn,Bc[:,1].unsqueeze(1)),dim=1)
+
+        energies = self.calculate_energies(x=Bc, edge_index=edge_index, edge_attributes=edge_attributes)
+        energies = energies + sa_energies
+
+        return energies.sum()
+
+    def build_gnn_graph(self, positions):
+
+        # Extract edge index
+        edge_index = torch_cluster.radius_graph(
+            positions, self._gnn_radius, None, False, self._max_num_neighbors,
+            'source_to_target')
+
+        # Extract edge features
+        distances = self._distancer(positions[edge_index[0]], positions[edge_index[1]])
+
+        # For GBNeck model distances are features
+        edge_attributes = distances.unsqueeze(1)
+
+        return None, edge_index, edge_attributes
+
+    def build_graph(self, positions):
+
+        # Extract edge index
+        edge_index = torch_cluster.radius_graph(
+            positions, 10.0, None, False, self._max_num_neighbors,
+            'source_to_target')
+
+        # Extract edge features
+        distances = self._distancer(positions[edge_index[0]], positions[edge_index[1]])
+
+        # For GBNeck model distances are features
+        edge_attributes = distances.unsqueeze(1)
+
+        return None, edge_index, edge_attributes
+
