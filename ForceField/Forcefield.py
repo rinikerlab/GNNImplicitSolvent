@@ -46,11 +46,12 @@ class _generic_force_field:
         nonbondedCutoff=1*nanometer):
 
         if self.water_model == "implicit":
-            return self._openmm_forcefield.createSystem(topology=topology,nonbondedMethod=NoCutoff,constraints=HBonds)
+            self._system = self._openmm_forcefield.createSystem(topology=topology,nonbondedMethod=NoCutoff,constraints=HBonds)
         else:
             print("built explicit System",nonbondedMethod,nonbondedCutoff)
-            return self._openmm_forcefield.createSystem(topology=topology,nonbondedMethod=nonbondedMethod,
+            self._system = self._openmm_forcefield.createSystem(topology=topology,nonbondedMethod=nonbondedMethod,
                                                     nonbondedCutoff=nonbondedCutoff,constraints=HBonds)
+        return self._system
 
 
     def __str__(self):
@@ -86,11 +87,14 @@ class OpenFF_forcefield(_generic_force_field):
         topology.add_molecule(self._solute)
         topology = topology.to_openmm()
         
+        self._generator_outputs = []
         for res in topology.residues():
-            smirnoff.generator(forcefield,res)
+            self._generator_outputs.append(smirnoff.generator(forcefield,res))
     
         super().__init__(force_field = forcefield)
         self._ready_for_usage = True
+        self._smirnoff = smirnoff
+        self._topology = topology
 
     def create_system(self, topology, nonbondedMethod=PME, nonbondedCutoff=1 * nanometer):
         return super().create_system(topology, nonbondedMethod, nonbondedCutoff)

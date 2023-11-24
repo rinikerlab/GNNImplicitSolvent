@@ -6,7 +6,6 @@ import warnings
 
 import mdtraj
 import numpy as np
-import pandas as pd
 import tqdm
 
 from Data.Datahandler import DataHandler
@@ -18,6 +17,9 @@ from openmm.unit import nanometer, picoseconds, nanoseconds, elementary_charge, 
     nanometers, kilojoules_per_mole, norm, bar
 from openmm.app import element
 from openmm.vec3 import Vec3
+from openmm.app.internal.customgbforces import GBSAGBn2Force
+
+import openff.toolkit.topology
 
 from openmm import HarmonicBondForce, NonbondedForce, Context
 from copy import deepcopy
@@ -1200,6 +1202,63 @@ class Multi_simulator(Simulator):
         time.sleep(2)
 
         return savedir + savename, savedir + refsavename
+
+    def get_gbneck_parameters(self, trainer, work_dir, pdb_id):
+        """Obtain gbneck parameters for a molecule (defined by pdb_id) from a GNN_Trainer.Trainer"""
+        trainer.explicit = True
+        gbneck_parameters, _ = trainer.get_gbneck2_param(pdb_id,work_dir,cache=self._cache)
+        return gbneck_parameters
+
+
+def prepare_torch_model(gbneck_parameters, trainer, trained_model, radius, fraction, model, run_model, gbneck_radius=10.0, device='cuda', use_half_precision=False, num_rep=1):
+    """Return a torch implicit solvent model with charges and radii given by gbneck_parameters.
+
+    Note: It is recommended that the radii are generated the same way as in the
+    training procedure. To obtain such radii, use the "get_vdw_radii" function.
+
+    :param gbneck_parameters: 2D array with at least 2 columns (charge and radius for each atom)
+    :param trainer: GNN_Trainer.Trainer object
+    :param trained_model: Torch model filename
+    :param radius: Distance cutoff parameter of the training process. Should match the trained_model.
+    :param fraction: Parameter of the training process. Should match the trained_model.
+    :param model: subclass of torch.nn.Module from GNN_Models folder, that defines the delta learning architecture.
+    :param run_model: like model, but should be one of the *_run_multiple* classes
+    :param gbneck_radius: passed to run_model
+    :param device: "cuda" or "cpu"
+    :param use_half_precision: Reduce the model to half (16 bit) precision (bool)
+    :param num_rep: number of repetitions
+    """
+    model = model(radius=radius, max_num_neighbors=10000, parameters=gbneck_parameters, device=device, fraction=fraction)
+    trainer.model = model
+    trainer.load_model_dict_for_finetuning(trained_model)
+
+    model_state_dict = trainer._model.state_dict()
+
+    gnn_run = run_model(radius=radius, max_num_neighbors=1000, parameters=gbneck_parameters, device=device, fraction=fraction, jittable=True, num_reps=num_rep, gbneck_radius=gbneck_radius)
+    gnn_run.load_state_dict(model_state_dict, strict=False)
+    gnn_run.to(device)
+    if use_half_precision:
+        gnn_run.half()
+    return torch.jit.optimize_for_inference(torch.jit.script(gnn_run.eval()))
+
+
+VDW_RADIUS_OFFSET = 0.0195141
+
+def get_vdw_radii(mol):
+    """Get VdW radii for an rdkit molecule, consistent with the ML training.
+    
+    :param mol: rdkit.Mol, with explicit hydrogen atoms.
+
+    Returns a numpy array with shape (n_atoms,)
+    """
+    off_mol = openff.toolkit.topology.Molecule.from_rdkit(mol)
+    off_top = openff.toolkit.topology.Topology()
+    off_top.add_molecule(off_mol)
+    omm_top = off_top.to_openmm()
+    force = GBSAGBn2Force(cutoff=None, SA=None, soluteDielectric=1)
+    params = force.getStandardParameters(omm_top)
+    radii = params[:, 0] - VDW_RADIUS_OFFSET
+    return radii
 
 
 def to_Vec3(xyz):

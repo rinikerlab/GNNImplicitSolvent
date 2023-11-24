@@ -355,7 +355,15 @@ class GNN3_all_swish_multiple_peptides_GBNeck_trainable_dif_graphs_corr_with_sep
 
         return 0
 
-    def forward(self, positions):
+    def forward(self, positions, return_energy_tensors=False):
+        """Compute the NN implicit solvent energy for given positions.
+
+        :param positons: torch.tensor (on the correct device!) with the positions.
+        :param return_energy_tensors: if True, return a dict with keys
+            "polar_energy" and "apolar_energy", where each value is a
+            torch.tensor with length n_atoms. Otherwise, return the total
+            energy as a 0-dimensional torch tensor (single value).
+        """
 
         # Build Graph
         _, edge_index, edge_attributes = self.build_graph(positions)
@@ -396,6 +404,9 @@ class GNN3_all_swish_multiple_peptides_GBNeck_trainable_dif_graphs_corr_with_sep
 
         # Evaluate GB energies
         energies = self.calculate_energies(x=Bc, edge_index=edge_index, edge_attributes=edge_attributes)
+
+        if return_energy_tensors:
+            return {"polar_energy": bo_energies, "apolar_energies": sa_energies}
 
         # Add SA term
         energies = energies + sa_energies
