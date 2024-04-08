@@ -10,7 +10,7 @@ import numpy as np
 import torch_sparse
 
 class GBNeck_interaction(MessagePassing):
-    def __init__(self,parameters,device):
+    def __init__(self,parameters,device,unique_radii=None):
         '''
         GBNeck interaction
         '''
@@ -175,13 +175,16 @@ class GBNeck_interaction(MessagePassing):
         m0 = [m * 10.0 for m in m0]
 
 
-        self.findUniqueRadii()
+        if unique_radii is None:
+            self.findUniqueRadii()
+        else:
+            self._uniqueRadii = list(sorted(set(unique_radii)))
         self.createRadiusToIndexMap()
         self.register_buffer('_d0',torch.tensor(self.createUniqueTable(d0),dtype=torch.float,device=self._device))
         self.register_buffer('_m0', torch.tensor(self.createUniqueTable(m0), dtype=torch.float,device=self._device))
         self._num_unique = len(self._uniqueRadii)
 
-        self._param = torch.tensor(self._gbparameters,dtype=torch.float,device=self._device)
+        # self._param = torch.tensor(self._gbparameters,dtype=torch.float,device=self._device)
 
 
     def findUniqueRadii(self):
@@ -229,7 +232,6 @@ class GBNeck_interaction(MessagePassing):
     def forward(self, edge_index, x, edge_attributes):
         edge_attributes = edge_attributes.to(self._device)
         edge_index = edge_index.to(self._device)
-
         # propagate_type: (x: torch.Tensor, edge_attributes: torch.Tensor)
         I = self.propagate(edge_index, x=x, edge_attributes=edge_attributes,size=None)
 
@@ -258,7 +260,6 @@ class GBNeck_interaction(MessagePassing):
         neckScale = 0.826836
         neckCut = 0.68
         offset = 0.0195141
-
         # x features = [charge,or,sr,alpha,beta,gamma,radindex]
         or1 = x_i[:,1]
         sr1 = x_i[:,2]
@@ -268,7 +269,6 @@ class GBNeck_interaction(MessagePassing):
         radindex2 = x_j[:,6].to(dtype=torch.int,device=self._device)
 
         r = edge_attributes[:,0]
-
 
         radius2 = or2 + offset
         radius1 = or1 + offset
@@ -288,7 +288,7 @@ class GBNeck_interaction(MessagePassing):
         return I.unsqueeze(1)
 
 class GBNeck_energies(MessagePassing):
-    def __init__(self,parameters,device):
+    def __init__(self,parameters,device,unique_radii=None):
         '''
         GBNeck interaction
         '''
@@ -301,7 +301,7 @@ class GBNeck_energies(MessagePassing):
         # defaultparam
         self._OFFSET = 0.0195141
         self._RADIUS_ARG_POSITION = 1
-        self._d0 = [2.26685, 2.32548, 2.38397, 2.44235, 2.50057, 2.55867, 2.61663, 2.67444,
+        self.__d0 = [2.26685, 2.32548, 2.38397, 2.44235, 2.50057, 2.55867, 2.61663, 2.67444,
               2.73212, 2.78965, 2.84705, 2.9043, 2.96141, 3.0184, 3.07524, 3.13196,
               3.18854, 3.24498, 3.30132, 3.35752, 3.4136,
               2.31191, 2.37017, 2.4283, 2.48632, 2.5442, 2.60197, 2.65961, 2.71711,
@@ -364,7 +364,7 @@ class GBNeck_energies(MessagePassing):
               3.22855, 3.28307, 3.33751, 3.39188, 3.4462, 3.50046, 3.55466, 3.6088,
               3.6629, 3.71694, 3.77095, 3.82489, 3.8788, 3.93265, 3.98646, 4.04022,
               4.09395, 4.14762, 4.20126, 4.25485, 4.3084]
-        self._m0 = [0.0381511, 0.0338587, 0.0301776, 0.027003, 0.0242506, 0.0218529,
+        self.__m0 = [0.0381511, 0.0338587, 0.0301776, 0.027003, 0.0242506, 0.0218529,
               0.0197547, 0.0179109, 0.0162844, 0.0148442, 0.0135647, 0.0124243,
               0.0114047, 0.0104906, 0.00966876, 0.008928, 0.0082587, 0.00765255,
               0.00710237, 0.00660196, 0.00614589,
@@ -449,15 +449,22 @@ class GBNeck_energies(MessagePassing):
               0.0199351, 0.018442, 0.0170909, 0.0158654, 0.0147514, 0.0137365,
               0.0128101, 0.0119627, 0.0111863]
         # Rescale to nanometers
-        self._d0 = [d / 10.0 for d in self._d0]
-        self._m0 = [m * 10.0 for m in self._m0]
+        self.__d0 = [d / 10.0 for d in self.__d0]
+        self.__m0 = [m * 10.0 for m in self.__m0]
 
-
-        self.findUniqueRadii()
+        if unique_radii is None:
+            self.findUniqueRadii()
+        else:
+            self._uniqueRadii = list(sorted(set(unique_radii)))
         self.createRadiusToIndexMap()
-        self._d0 = torch.tensor(self.createUniqueTable(self._d0),dtype=torch.float)
-        self._m0 = torch.tensor(self.createUniqueTable(self._m0),dtype=torch.float)
+        self.register_buffer('_d0', torch.tensor(self.createUniqueTable(self.__d0),dtype=torch.float))
+        self.register_buffer('_m0',torch.tensor(self.createUniqueTable(self.__m0),dtype=torch.float))
         self._num_unique = len(self._uniqueRadii)
+
+        self.register_buffer('_soluteDielectric',torch.tensor(1, dtype=torch.float,device=self._device))
+        self.register_buffer('_solventDielectric',torch.tensor(78.5, dtype=torch.float,device=self._device))
+
+
 
     def findUniqueRadii(self):
         radii = [p[self._RADIUS_ARG_POSITION] for p in self._gbparameters]
@@ -495,49 +502,66 @@ class GBNeck_energies(MessagePassing):
 
     def getm0(self,idx1,idx2):
         indices = self._num_unique * idx1 + idx2
-        return torch.index_select(self._m0,0,indices)
+        return torch.gather(self._m0,0,indices)
 
     def getd0(self,idx1,idx2):
         indices = self._num_unique * idx1 + idx2
-        return torch.index_select(self._d0,0,indices)
+        return torch.gather(self._d0,0,indices)
 
     def forward(self, edge_index, x, edge_attributes):
 
         # propagate_type: (x: torch.Tensor, edge_attributes: torch.Tensor)
         # charges = torch.tensor(self._gbparameters, dtype=torch.float,device=self._device)[:, 0]
-        x = x.to(self._device)
-        edge_attributes = edge_attributes.to(self._device)
-        edge_index = edge_index.to(self._device)
+        # x = x.to(self._device)
+        # edge_attributes = edge_attributes.to(self._device)
+        # edge_index = edge_index.to(self._device)
 
         # x = torch.concat((x.unsqueeze(1),charges.unsqueeze(1)),dim=1)
         pair_energies = self.propagate(edge_index, x=x, edge_attributes=edge_attributes,size=None)
 
-        # do not doublecount
-        pair_energies = pair_energies / 2
-
         # Nodewise combination
         single_energy = self.nodewise(x)
+        tot_energy = pair_energies + single_energy
 
-        return pair_energies + single_energy
+        # Half and double counting
+        return -0.5*138.935485*(1/self._soluteDielectric-1/self._solventDielectric)*tot_energy
+
 
     def nodewise(self,x):
 
-        soluteDielectric = torch.tensor(1, dtype=torch.float,device=self._device)
-        solventDielectric = torch.tensor(78.5, dtype=torch.float,device=self._device)
         B = x[:,0]
         charge = x[:,1]
 
-        energy = -0.5*138.935485*(1/soluteDielectric-1/solventDielectric)*charge**2/B
+        energy = charge**2/B
+
+        return energy.unsqueeze(1)
+
+
+    def message(self, x_i : torch.Tensor, x_j : torch.Tensor , edge_attributes : torch.Tensor) -> torch.Tensor:
+        
+        r2 = torch.pow(edge_attributes[:,0],2)
+        B1B2 = x_i[:,0] * x_j[:,0]
+        charge1charge2 = x_i[:,1] * x_j[:,1]
+
+        f = torch.sqrt(r2 + B1B2*torch.exp(-r2/(4*B1B2)))
+        energy = charge1charge2/f
+        return energy.unsqueeze(1)
+
+
+    def nodewise_dep(self,x):
+
+        B = x[:,0]
+        charge = x[:,1]
+
+        energy = -0.5*138.935485*(1/self._soluteDielectric-1/self._solventDielectric)*charge**2/B
 
         return energy.unsqueeze(1)
 
 
 
-    def message(self, x_i : torch.Tensor, x_j : torch.Tensor , edge_attributes : torch.Tensor) -> torch.Tensor:
-
-        soluteDielectric = torch.tensor(1,dtype=torch.float,device=self._device)
-        solventDielectric = torch.tensor(78.5,dtype=torch.float,device=self._device)
-
+    def message_dep(self, x_i : torch.Tensor, x_j : torch.Tensor , edge_attributes : torch.Tensor) -> torch.Tensor:
+        
+        
         r = edge_attributes[:,0]
         B1 = x_i[:,0]
         B2 = x_j[:,0]
@@ -545,29 +569,40 @@ class GBNeck_energies(MessagePassing):
         charge2 = x_j[:,1]
 
         f = torch.sqrt(r**2 + B1*B2*torch.exp(-r**2/(4*B1*B2)))
-        energy = -138.935485*(1/soluteDielectric-1/solventDielectric)*charge1*charge2/f
+        energy = -138.935485*(1/self._soluteDielectric-1/self._solventDielectric)*charge1*charge2/f
         return energy.unsqueeze(1)
+    
+    def dense(self,x,edge_attributes):
+
+        B = x[:,0]
+        charge = x[:,1]
+        r = edge_attributes[:,0]
+
+        B1B2 = torch.outer(B,B)
+        C1C2 = torch.outer(charge,charge)
+        
+        
 
 class IN_layer_all_swish_2pass(MessagePassing):
     '''
     2 Layer passes
     '''
-    def __init__(self, in_channels, out_channels,cutoff=0.7,device='cuda'):
+    def __init__(self, in_channels, out_channels,cutoff=0.7,device='cuda',hidden=128):
         super().__init__(aggr='add')
 
         self._cutoff = cutoff
 
         self._NUM_KERNELS = 20
-        self._FREQUENCIES = np.pi * torch.arange(1, self._NUM_KERNELS + 1, dtype=torch.float,device=device)
+        self.register_buffer('_FREQUENCIES', np.pi * torch.arange(1, self._NUM_KERNELS + 1, dtype=torch.float,device=device))
         self._silu = torch.nn.SiLU()
 
         # Message MLP
-        self.message1 = torch.nn.Linear(in_channels + self._NUM_KERNELS, 128)
-        self.message2 = torch.nn.Linear(128,128)
+        self.message1 = torch.nn.Linear(in_channels + self._NUM_KERNELS, hidden)
+        self.message2 = torch.nn.Linear(hidden,hidden)
 
         # Node MLP
-        self.lin1 = torch.nn.Linear(128, 128)
-        self.lin2 = torch.nn.Linear(128, out_channels)
+        self.lin1 = torch.nn.Linear(hidden, hidden)
+        self.lin2 = torch.nn.Linear(hidden, out_channels)
 
     def forward(self, x, edge_index, edge_attributes):
         

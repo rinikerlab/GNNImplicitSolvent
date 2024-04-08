@@ -10,7 +10,8 @@ Date: 03.04.2023
 
 import time
 import warnings
-
+from scipy.stats import wasserstein_distance
+from numba import njit
 from multiprocessing import Pool
 
 from multiprocessing import Pool
@@ -1904,3 +1905,209 @@ def reformat(values, leng=6):
 
 def calc_sasa_radius(traj):
     return np.mean(shrake_rupley(traj))
+
+
+# utility analysis functions
+
+def normalize(arr):
+    arr[arr==0] = np.min(arr[arr>0])
+    return arr / np.sum(arr)
+
+def in_kjmol(z):
+    kT = 2.479
+    z[z==0] = np.min(z[z>0])
+    return (-np.log(normalize(z)) - np.min(-np.log(normalize(z)))) * kT
+
+def get_dihedrals_by_name(traj,i,j,k,l,ins=2):
+
+
+    if isinstance(traj,list):
+        dis = []
+        for t in traj:
+            dis.append(get_dihedrals_by_name(t,i,j,k,l,ins))
+        return dis
+
+    oc = 0
+    for a,atom in enumerate(traj.top.atoms):
+        if str(atom)[-len(i):] == i:
+            i_id = a
+            oc += 1
+        if str(atom)[-len(j):] == j:
+            j_id = a
+            oc += 1
+        if str(atom)[-len(k):] == k:
+            k_id = a
+            oc += 1
+        if str(atom)[-len(l):] == l:
+            l_id = a
+            oc += 1
+    assert oc == 4
+    
+    return mdtraj.compute_dihedrals(traj,[[i_id,j_id,k_id,l_id]])
+
+
+def get_prob(d1,d2,num=50):
+    z, xedge, yedge = np.histogram2d(d1,d2,density=True,bins=np.linspace(-np.pi,np.pi,num=num))
+    x = 0.5 * (xedge[:-1] + xedge[1:])
+    y = 0.5 * (yedge[:-1] + yedge[1:])
+    z = z.T
+
+    return x,y,z
+
+def get_xyz(d1,d2,num_bins=50,bins=None):
+    if bins is None:
+        bins = np.linspace(-np.pi,np.pi,num=num_bins)
+    z, xedge, yedge = np.histogram2d(d1,d2,density=False,bins=bins)
+    x = 0.5 * (xedge[:-1] + xedge[1:])
+    y = 0.5 * (yedge[:-1] + yedge[1:])
+    z = z.T
+
+    kjz = in_kjmol(z)
+
+    return x,y,kjz
+
+def get_xz(d1):
+    z, xedge = np.histogram(d1,bins=100)
+    x = 0.5 * (xedge[:-1] + xedge[1:])
+    z = z.T
+
+    return x,in_kjmol(z)
+
+def initialize_plt(figsize = (15,10),fontsize = 22):
+    # initialice Matplotlib
+    _=plt.figure()
+    plt.rcParams["figure.figsize"] = figsize
+    plt.rcParams.update({'font.size': fontsize})
+    plt.rcParams.update({'font.family':'Sans'})
+
+
+def plot_free_energy(ax,dis,nbins,range=[0.1,0.7],color='blue',label='',ret_xz=False,linewidth=5,linestyle='solid',use_jakobian_correction=True):
+
+    if not isinstance(dis,list):
+        dis = [dis]
+
+    zs = []
+    for d in dis:
+        z, xedge = np.histogram(d,bins=nbins,range=range)
+        x = 0.5 * (xedge[:-1] + xedge[1:])
+        z = z.T
+        zs.append(z)
+    if use_jakobian_correction:
+        valuey = np.array([in_kjmol(z/(4*np.pi*(x**2))) for z in zs])
+    else:
+        valuey = np.array([in_kjmol(z) for z in zs])
+    mean_y = np.nanmean(valuey,axis=0) - np.min(np.nanmean(valuey,axis=0)) # static shift
+    std_y = np.nanstd(valuey,axis=0)
+    if ret_xz:
+        return x, mean_y, std_y
+    ax.plot(x,mean_y,linewidth=linewidth,color=color,label=label,linestyle=linestyle)
+    ax.fill_between(x=x,y1=mean_y - std_y,y2=mean_y + std_y,color=color, alpha=0.3)
+
+def load_parallel_traj(file,nrep):
+    traj = mdtraj.load(file)
+    individual_trajs = []
+    individual_trajs += [traj.atom_slice(traj.top.select('chainid %i' % i)) for i in range(nrep)]
+    return individual_trajs
+
+def plot_contour(ax, x, y, z, levels, cmap, vmin, vmax,location=None,label=None):
+    cf = ax.contourf(x/np.pi*180, y/np.pi*180, z, levels=levels, cmap=cmap, vmin=vmin, vmax=vmax)
+    if location != 'share':
+        cbar = plt.colorbar(cf, ax=ax, shrink=0.5,location=location,label=label)
+        cbar.ax.set_aspect(20)
+        cbar.ax.tick_params(labelsize=10)
+        return cf, cbar
+    else:
+        return cf
+
+def plot_wass_dist(ax, gnz, z, label):
+    import ot
+    M = ot.dist(gnz, z)
+    wass_dist = ot.emd2([], [], M)
+    if not label is None:
+        ax.text(0.5, 0.925, f'{label}: {wass_dist:.4f}', horizontalalignment='center', verticalalignment='center', transform=ax.transAxes, fontsize=16)
+    return wass_dist
+
+def get_distance_by_name(traj,n1,n2):
+    if isinstance(traj,list):
+        dis = []
+        for t in traj:
+            dis.append(get_distance_by_name(t,n1,n2))
+        return dis
+
+    oc = 0
+    for a,atom in enumerate(traj.top.atoms):
+        if str(atom)[-len(n1):] == n1:
+            n1_id = a
+            oc += 1
+        if str(atom)[-len(n2):] == n2:
+            n2_id = a
+            oc += 1
+    assert oc == 2
+    
+    return calculate_distance(traj.xyz,(n1_id, n2_id))
+
+def calculate_distance(xyz,fromto):
+    return np.reshape(np.sqrt(np.sum((xyz[:,fromto[0]]-xyz[:,fromto[1]])**2,axis=1)),(xyz.shape[0],1))
+
+
+def get_wasserstein_distance(d1,d2,nbins=50,drange=(0.1,0.5),use_jakobian_correction=False):
+    if use_jakobian_correction:
+        hist1, bin_edges1 = np.histogram(d1, bins=nbins, range=drange,density=True)
+        hist2, bin_edges2 = np.histogram(d2, bins=nbins, range=drange,density=True)
+
+        x = 0.5 * (bin_edges1[:-1] + bin_edges1[1:])
+        hist1 = hist1/(4*np.pi*(x**2))
+        hist1 = normalize(hist1)
+
+        x = 0.5 * (bin_edges2[:-1] + bin_edges2[1:])
+        hist2 = hist2/(4*np.pi*(x**2))
+        hist2 = normalize(hist2)
+
+        return wasserstein_distance(hist1,hist2)
+    else:
+        hist1, bin_edges1 = np.histogram(d1, bins=nbins, range=drange, density=True)
+        hist2, bin_edges2 = np.histogram(d2, bins=nbins, range=drange, density=True)
+        return wasserstein_distance(hist1, hist2)
+
+
+@njit(fastmath=True)
+def get_cluster_assignment(coords,new_coord,ref_labels):
+
+    diff = np.sum((coords - new_coord)**2,axis=1)
+    return ref_labels[np.argmin(diff)]
+
+@njit(fastmath=True)
+def get_cluster_assignment_multiple(coords,new_coords,ref_labels):
+    return np.array([get_cluster_assignment(coords,new_coord,ref_labels) for new_coord in new_coords])
+
+@njit(fastmath=True,parallel=True)
+def get_cluster_assignment_multiple_parallel(coords,new_coords,ref_labels):
+
+    labels = np.empty(len(new_coords))
+    for i in prange(len(new_coords)):
+        labels[i] = get_cluster_assignment(coords,new_coords[i],ref_labels)
+    
+    return labels
+
+@njit(fastmath=True)
+def get_cluster_assignment_multiple_vec(coords,new_coords,ref_labels):
+    positions = np.argmin(np.sum((coords - new_coords.reshape((len(new_coords),1,2)))**2,axis=2),axis=1)
+    return ref_labels[positions]
+
+COLORDICT =  {'TIP5P':'darkblue','GBNeck2':'purple','GNN':'orange','TIP3P':'lightblue'}
+
+def plot_solvent_legend(ax,models,cols=1,legend_ops={'loc':'center'}):
+    
+    legend_keys = ['TIP5P','TIP3P','GBNeck2','GNN',' ']
+    legend_keys = [key for key in legend_keys for m in models if key in m]
+
+    legend_elements = [Line2D([0], [0], color=COLORDICT[m], lw=4, label=m) for m in legend_keys]
+    ph = [ax.plot([],marker="", ls="",label='Solvent Model:')[0]]
+    legend_elements = ph + legend_elements
+
+    ax.legend(handles=legend_elements,ncol=1 + int(len(legend_keys)/cols),frameon=False,**legend_ops)
+    ax.grid(False)
+    ax.axis('off')
+    ax.axis('off')
+
+    return None

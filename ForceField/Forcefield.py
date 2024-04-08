@@ -6,6 +6,9 @@ from openmm.openmm import CustomGBForce, GBSAOBCForce, CustomBondForce, CustomNo
 import numpy as np
 from copy import deepcopy
 
+from openff.toolkit.topology import Molecule, Topology
+from openmmforcefields.generators import SMIRNOFFTemplateGenerator
+
 from openmm.app.internal.customgbforces import *
 from openmm.app.internal.customgbforces import _createEnergyTerms
 
@@ -53,15 +56,189 @@ class _generic_force_field:
     def __str__(self):
         return self.__class__.__name__
 
+
+class OpenFF_forcefield(_generic_force_field):
+
+
+    def __init__(self,pdb_id,solvent_model='TIP3P',cache=None):
+        
+        solute_smiles = pdb_id.split('_in_')[0]
+        solvent_smiles = pdb_id.split('_in_')[1]
+        self._solvent_model = solvent_model.lower()
+
+        self._solute = Molecule.from_smiles(solute_smiles,allow_undefined_stereo=True)
+        if solvent_smiles != 'v':
+            self._solvent = Molecule.from_smiles(solvent_smiles)
+        if (solvent_smiles == 'O'):
+            smirnoff = SMIRNOFFTemplateGenerator(molecules=[self._solute],forcefield='openff-2.0.0',cache=cache)
+            forcefield = ForceField('%s.xml' % self._solvent_model)
+            print('Water considered %s' % self._solvent_model)
+        elif (solvent_smiles == 'v'):
+            smirnoff = SMIRNOFFTemplateGenerator(molecules=[self._solute],forcefield='openff-2.0.0',cache=cache)
+            forcefield = ForceField()
+        else:
+            smirnoff = SMIRNOFFTemplateGenerator(molecules=[self._solvent,self._solute],forcefield='openff-2.0.0',cache=cache)
+            forcefield = ForceField()
+
+        forcefield.registerTemplateGenerator(smirnoff.generator)
+
+        topology = Topology()
+        topology.add_molecule(self._solute)
+        topology = topology.to_openmm()
+        
+        for res in topology.residues():
+            smirnoff.generator(forcefield,res)
+    
+        super().__init__(force_field = forcefield)
+        self._ready_for_usage = True
+
+    def create_system(self, topology, nonbondedMethod=PME, nonbondedCutoff=1 * nanometer):
+        return super().create_system(topology, nonbondedMethod, nonbondedCutoff)
+
+    def __str__(self):
+        return "openff200_" + self._solvent_model
+
+    @property
+    def water_model(self):
+        return "explicit"
+
+class OpenFF_forcefield_vacuum(OpenFF_forcefield):
+
+    def create_system(self, topology, nonbondedMethod=NoCutoff,nonbondedCutoff=1 * nanometer):
+        return super().create_system(topology, NoCutoff)
+
+    def __str__(self):
+        return "openff200_vacuum"
+
+    @property
+    def water_model(self):
+        return "implicit"
+
+
+
+class OpenFF_forcefield_vacuum_plus_custom(OpenFF_forcefield):
+
+    def __init__(self, pdb_id,custom_force,force_name='GNN',cache=None):
+        super().__init__(pdb_id,cache=cache)
+        self._custom_force = custom_force
+        self._force_name = force_name
+
+    def create_system(self, topology, nonbondedMethod=PME, nonbondedCutoff=1 * nanometer):
+        system = super().create_system(topology, NoCutoff)
+        custom_force = deepcopy(self._custom_force)
+        system.addForce(custom_force)
+        return system
+
+    def __str__(self):
+        return "openff200_vacuum_plus_" + self._force_name
+
+    @property
+    def water_model(self):
+        return "implicit"
+
+
+class OpenFF_forcefield_GBNeck2(OpenFF_forcefield):
+
+    def __init__(self, pdb_id, solvent_model='TIP3P',SA=None,cache=None):
+        super().__init__(pdb_id, solvent_model,cache=cache)
+        self._SA = SA
+
+    def create_system(self, topology, nonbondedMethod=PME, nonbondedCutoff=1 * nanometer):
+
+        system = self._openmm_forcefield.createSystem(topology=topology,nonbondedMethod=NoCutoff,constraints=HBonds)
+        charges = np.array([system.getForces()[0].getParticleParameters(i)[0]._value for i in range(topology._numAtoms)])
+
+        force = GBSAGBn2Force(cutoff=None,SA=self._SA,soluteDielectric=1)
+        gbn2_parameters = np.empty((topology.getNumAtoms(),6))
+        gbn2_parameters[:,0] = charges # Charges
+        gbn2_parameters[:,1:] = force.getStandardParameters(topology) # GBNeck2 parameters
+
+        self._Data = gbn2_parameters
+        # Add Particles and finalize force
+        force.addParticles(gbn2_parameters)
+        force.finalize()
+
+        # Create System and add force
+        system.addForce(force)
+
+        return system
+
+    def __str__(self):
+        if self._SA is None:
+            return "openff200_GBNeck2"
+        else:
+            return "openff200_SAGBNeck2"
+
+    @property
+    def water_model(self):
+        return "implicit"
+
+    @property
+    def Data(self):
+        return self._Data
+
+    @Data.setter
+    def Data(self,Data):
+        self._Data = Data
+
+class OpenFF_forcefield_SAGBNeck2(OpenFF_forcefield_GBNeck2):
+
+    def __init__(self, pdb_id, solvent_model='TIP3P', SA='ACE', cache=None):
+        super().__init__(pdb_id, solvent_model, SA, cache)
+
+
+class OpenFF_forcefield_GBNeck2_e4(OpenFF_forcefield):
+
+    def __init__(self, pdb_id, solvent_model='TIP3P',SA=None):
+        super().__init__(pdb_id, solvent_model)
+        self._SA =SA
+
+    def create_system(self, topology, nonbondedMethod=PME, nonbondedCutoff=1 * nanometer):
+
+        system = self._openmm_forcefield.createSystem(topology=topology,nonbondedMethod=NoCutoff,constraints=HBonds)
+        charges = np.array([system.getForces()[0].getParticleParameters(i)[0]._value for i in range(topology._numAtoms)])
+
+        force = GBSAGBn2Force(cutoff=None,SA=self._SA,soluteDielectric=1,solventDielectric=4)
+        gbn2_parameters = np.empty((topology.getNumAtoms(),6))
+        gbn2_parameters[:,0] = charges # Charges
+        gbn2_parameters[:,1:] = force.getStandardParameters(topology) # GBNeck2 parameters
+
+        self._Data = gbn2_parameters
+        # Add Particles and finalize force
+        force.addParticles(gbn2_parameters)
+        force.finalize()
+
+        # Create System and add force
+        system.addForce(force)
+
+        return system
+
+    def __str__(self):
+        return "openff200_GBNeck2_epsilon_4"
+
+    @property
+    def water_model(self):
+        return "implicit"
+
+    @property
+    def Data(self):
+        return self._Data
+
+    @Data.setter
+    def Data(self,Data):
+        self._Data = Data
+
+
 class Vacuum_force_field_plus_custom(_generic_force_field):
 
-    def __init__(self,custom_force):
+    def __init__(self,custom_force,force_name='GNN'):
         super().__init__(force_field = ForceField('amber99sbildn.xml'))
         self._ready_for_usage = True
         self._custom_force = custom_force
+        self._force_name = force_name
 
     def __str__(self):
-        return "vacuum"
+        return "vacuum_plus_" + self._force_name
 
     def create_system(self, topology, nonbondedMethod=None,
         nonbondedCutoff=1*nanometer):
@@ -90,10 +267,11 @@ class Vacuum_force_field_plus_custom_plus_dummy_GB(_generic_force_field):
         nonbondedCutoff=1*nanometer):
 
         custom_force = deepcopy(self._custom_force)
+        custom_force.setForceGroup(2)
         system = self._openmm_forcefield.createSystem(topology=topology, nonbondedMethod=NoCutoff, constraints=HBonds)
         system.addForce(custom_force)
 
-        force = GBSAGBn2Force(cutoff=None, SA=None, soluteDielectric=1,solventDielectric=2)
+        force = GBSAGBn2Force(cutoff=None, SA=None, soluteDielectric=1,solventDielectric=1.0001/1)
 
         gbn2_parameters = np.empty((topology.getNumAtoms(), 6))
         gbn2_parameters[:, 0] = self._Data[:, 0]  # Charges
@@ -104,6 +282,7 @@ class Vacuum_force_field_plus_custom_plus_dummy_GB(_generic_force_field):
         force.finalize()
 
         # Create System and add force
+        force.setForceGroup(3)
         system.addForce(force)
 
         return system
@@ -111,7 +290,6 @@ class Vacuum_force_field_plus_custom_plus_dummy_GB(_generic_force_field):
     @property
     def water_model(self):
         return "implicit"
-
 
 class Vacuum_force_field(_generic_force_field):
 
@@ -278,7 +456,6 @@ class GB_force_field(_generic_force_field):
     def Data(self,Data):
         self._Data = Data
 
-
 class test_force_field(_generic_force_field):
     def __init__(self,Data=None):
         forcefield = ForceField('amber99sbildn.xml')
@@ -369,7 +546,6 @@ class test_force_field(_generic_force_field):
     @Data.setter
     def Data(self,Data):
         self._Data = Data
-
 
 class GB_HCT_force_field(_generic_force_field):
     def __init__(self,Data=None):
@@ -468,6 +644,8 @@ class GBSA_HCT_force_field(_generic_force_field):
         self._Data = Data
 
 class GB_Neck2_force_field(_generic_force_field):
+    #equivalent to amber igb=8
+
     def __init__(self,Data=None):
         forcefield = ForceField('amber99sbildn.xml')
         self._Data = Data
@@ -516,6 +694,60 @@ class GB_Neck2_force_field(_generic_force_field):
     @Data.setter
     def Data(self,Data):
         self._Data = Data
+
+class GB_Neck2_force_field_plus_ML(_generic_force_field):
+    def __init__(self,Data=None,torchforce=None):
+        forcefield = ForceField('amber99sbildn.xml')
+        self._Data = Data
+        self._torchforce = torchforce
+        super().__init__(force_field = forcefield)
+        self._ready_for_usage = True
+
+    def create_system(self, topology, nonbondedMethod=NoCutoff,
+        nonbondedCutoff=1*nanometer):
+
+        cutoff = strip_unit(nonbondedCutoff, angstrom)
+        # Create GBn2 Force
+        #force = GBSAGBn2Force(cutoff=cutoff,SA=None,soluteDielectric=1)
+        force = GBSAGBn2Force(cutoff=None,SA=None,soluteDielectric=1)
+
+        gbn2_parameters = np.empty((topology.getNumAtoms(),6))
+        gbn2_parameters[:,0] = self._Data[:,0] # Charges
+        gbn2_parameters[:,1:] = force.getStandardParameters(topology) # GBNeck2 parameters
+        # Add Particles and finalize force
+        force.addParticles(gbn2_parameters)
+        force.finalize()
+
+        # Create System and add force
+        system = self._openmm_forcefield.createSystem(topology=topology,nonbondedMethod=NoCutoff,constraints=HBonds)
+        system.addForce(force)
+        custom_force = deepcopy(self._torchforce)
+        system.addForce(custom_force)
+
+        return system
+
+    def adapt_GB_values(self,system,Data):
+        pass
+
+    def __str__(self):
+        return "GB_Neck2_plus_ML"
+
+    @property
+    def scale_needed(self):
+        return True
+
+    @property
+    def water_model(self):
+        return "implicit"
+
+    @property
+    def Data(self):
+        return self._Data
+
+    @Data.setter
+    def Data(self,Data):
+        self._Data = Data
+
 
 class GBSA_Neck2_force_field(_generic_force_field):
     def __init__(self, Data=None):
@@ -1147,7 +1379,6 @@ class GBSA_ACE_I_scaling_force_field_no_SASA(_generic_force_field):
     def Data(self,Data):
         self._Data = Data
 
-
 class GBSA_ACE_born_scaling_force_field(_generic_force_field):
     def __init__(self,Data=None):
         forcefield = ForceField('amber99sbildn.xml')
@@ -1455,7 +1686,6 @@ class GB_2_force_field(_generic_force_field):
     @property
     def water_model(self):
         return "implicit"
-
 
 class GB_Neck2_scale_force_field(GBSAGBn2Force):
 
