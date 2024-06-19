@@ -2,7 +2,7 @@
 
 ## Publications
 
-[2] TBD, [https://chemrxiv.org](https://chemrxiv.org)
+[2] Chem. Sci., 2024, DOI: [https://doi.org/10.1039/D4SC02432J](https://doi.org/10.1039/D4SC02432J)
 
 [1] J. Chem. Phys. 158, 204101 (2023), DOI: [https://doi.org/10.1063/5.0147027](https://doi.org/10.1063/5.0147027)
 
