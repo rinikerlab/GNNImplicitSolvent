@@ -20,6 +20,12 @@ parser.add_argument("-i", "--interval", type=int, help="interval", default=1000)
 parser.add_argument(
     "-ad", "--addition", type=str, help="Additional information", default=""
 )
+parser.add_argument(
+    "-sd", "--solvent_dielectric", type=float, help="solvent dielectric", default=78.5
+)
+parser.add_argument(
+    "-sy", "--solvent_yaml", type=str, help="solvent yaml", default="solvents.yml"
+)
 args = parser.parse_args()
 
 import sys
@@ -31,18 +37,37 @@ from ForceField.Forcefield import (
     OpenFF_forcefield_GBNeck2,
     OpenFF_forcefield_vacuum,
     OpenFF_forcefield_SAGBNeck2,
+    OpenFF_TIP5P_forcefield,
 )
+import yaml
 from openmm import LangevinMiddleIntegrator, MonteCarloBarostat
 from openmm.unit import kelvin, picosecond, picoseconds, bar
 import pandas as pd
 from typing import DefaultDict
+import os
 
 forcefield_dict = DefaultDict(lambda: OpenFF_forcefield)
 forcefield_dict["SAGBNeck2"] = OpenFF_forcefield_SAGBNeck2
 forcefield_dict["GBNeck2"] = OpenFF_forcefield_GBNeck2
 forcefield_dict["vac"] = OpenFF_forcefield_vacuum
+forcefield_dict["TIP5P"] = OpenFF_TIP5P_forcefield
 
-solvent_model_dict = lambda x: x if not x in ["GBNeck2", "vac", "SAGBNeck2"] else "v"
+solvent_dict = yaml.load(open(args.solvent_yaml), Loader=yaml.FullLoader)[
+    "solvent_mapping_dict"
+]
+
+
+def solvent_model_dict(x):
+
+    if x in ["GBNeck2", "vac", "SAGBNeck2"]:
+        return "v"
+    if x in solvent_dict.keys():
+        return solvent_dict[x]["SMILES"]
+    if x == "TIP5P":
+        return "O"
+    else:
+        return x
+
 
 if args.file == "none":
     pdb_id = args.smi_id + "_in_" + solvent_model_dict(args.solvent)
@@ -58,6 +83,7 @@ work_dir = "../"  # directory of the repository
 n_interval = args.interval  # Interval for saving frames in steps
 ns = args.ns  # Nanoseconds to run the simulation for
 
+os.system("mkdir -p run_caches")
 sim = Simulator(
     work_dir=work_dir,
     pdb_id=pdb_id,
@@ -65,7 +91,17 @@ sim = Simulator(
     save_name=save_name,
     random_number_seed=args.random,
 )
-sim.forcefield = forcefield_dict[args.solvent](pdb_id)
+if args.solvent == "GBNeck2":
+    sim.forcefield = forcefield_dict[args.solvent](
+        pdb_id,
+        solvent_dielectric=args.solvent_dielectric,
+        cache="run_caches/" + save_name + ".cache",
+    )
+else:
+    sim.forcefield = forcefield_dict[args.solvent](
+        pdb_id,
+        cache="run_caches/" + save_name + ".cache",
+    )
 sim.integrator = LangevinMiddleIntegrator(
     300 * kelvin, 1 / picosecond, 0.002 * picoseconds
 )
@@ -74,3 +110,4 @@ if solvent_model_dict(args.solvent) != "v":
 sim.platform = "GPU"
 n_steps = ns / 0.002 * 1000
 sim.run_simulation(n_steps=n_steps, minimize=True, n_interval=n_interval)
+sim.save_states(0)

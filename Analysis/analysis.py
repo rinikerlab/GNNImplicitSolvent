@@ -23,6 +23,7 @@ import os
 from sys import exit
 import pandas as pd
 import seaborn as sns
+from scipy.signal import find_peaks
 
 # Modules for handling trajectories
 import mdtraj
@@ -42,7 +43,7 @@ from mdtraj import shrake_rupley, compute_rg
 from joblib import Parallel, delayed
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
-from skimage.measure import EllipseModel
+# from skimage.measure import EllipseModel
 from sklearn.decomposition import PCA
 from typing import DefaultDict
 import matplotlib.pyplot as plt
@@ -1909,14 +1910,19 @@ def calc_sasa_radius(traj):
 
 # utility analysis functions
 
-def normalize(arr):
-    arr[arr==0] = np.min(arr[arr>0])
+def normalize(arr, set_zero_to_max=True):
+    if set_zero_to_max:
+        arr[arr == 0] = np.min(arr[arr > 0])
     return arr / np.sum(arr)
 
-def in_kjmol(z):
+def in_kjmol(z, set_zero_to_max=True):
     kT = 2.479
-    z[z==0] = np.min(z[z>0])
-    return (-np.log(normalize(z)) - np.min(-np.log(normalize(z)))) * kT
+    if set_zero_to_max:
+        z[z == 0] = np.min(z[z > 0])
+    return (
+        -np.log(normalize(z, set_zero_to_max))
+        - np.min(-np.log(normalize(z, set_zero_to_max)))
+    ) * kT
 
 def get_dihedrals_by_name(traj,i,j,k,l,ins=2):
 
@@ -1981,7 +1987,7 @@ def initialize_plt(figsize = (15,10),fontsize = 22):
     plt.rcParams.update({'font.family':'Sans'})
 
 
-def plot_free_energy(ax,dis,nbins,range=[0.1,0.7],color='blue',label='',ret_xz=False,linewidth=5,linestyle='solid',use_jakobian_correction=True):
+def plot_free_energy(ax,dis,nbins,range=[0.1,0.7],color='blue',label='',ret_xz=False,linewidth=5,linestyle='solid',use_jakobian_correction=True,align_shifts_to=None,zorder=0):
 
     if not isinstance(dis,list):
         dis = [dis]
@@ -1996,17 +2002,38 @@ def plot_free_energy(ax,dis,nbins,range=[0.1,0.7],color='blue',label='',ret_xz=F
         valuey = np.array([in_kjmol(z/(4*np.pi*(x**2))) for z in zs])
     else:
         valuey = np.array([in_kjmol(z) for z in zs])
-    mean_y = np.nanmean(valuey,axis=0) - np.min(np.nanmean(valuey,axis=0)) # static shift
+    if align_shifts_to is None:
+        mean_y = np.nanmean(valuey,axis=0) - np.min(np.nanmean(valuey,axis=0))
+    else:
+        index = np.argmin(np.abs(x-align_shifts_to))
+        mean_y = np.nanmean(valuey,axis=0) - np.nanmean(valuey,axis=0)[index] # static shift
+    
     std_y = np.nanstd(valuey,axis=0)
+    if ax is None:
+        return x, mean_y, std_y
+    ax.plot(x,mean_y,linewidth=linewidth,color=color,label=label,linestyle=linestyle,zorder=zorder)
+    ax.fill_between(x=x,y1=mean_y - std_y,y2=mean_y + std_y,color=color, alpha=0.3,zorder=zorder)
     if ret_xz:
         return x, mean_y, std_y
-    ax.plot(x,mean_y,linewidth=linewidth,color=color,label=label,linestyle=linestyle)
-    ax.fill_between(x=x,y1=mean_y - std_y,y2=mean_y + std_y,color=color, alpha=0.3)
+
+def calculate_diff_in_kjmol_at_minima(dis1,dis2,nbins=50,drange=(0.1,0.5)):
+
+    x,y,std_y = plot_free_energy(None,dis1,nbins,drange,color='blue',label='TIP5P',ret_xz=True)
+    peaks = find_peaks(-y, prominence=1)[0]
+    ref_values = y[peaks]
+    x,y,std_y = plot_free_energy(None,dis2,nbins,drange,color='red',label='GBNeck2',ret_xz=True)
+    values = y[peaks]
+
+    return ref_values - values
+
+
+
 
 def load_parallel_traj(file,nrep):
     traj = mdtraj.load(file)
     individual_trajs = []
     individual_trajs += [traj.atom_slice(traj.top.select('chainid %i' % i)) for i in range(nrep)]
+    del traj
     return individual_trajs
 
 def plot_contour(ax, x, y, z, levels, cmap, vmin, vmax,location=None,label=None):
@@ -2023,9 +2050,7 @@ def plot_wass_dist(ax, gnz, z, label):
     import ot
     M = ot.dist(gnz, z)
     wass_dist = ot.emd2([], [], M)
-    if not label is None:
-        ax.text(0.5, 0.925, f'{label}: {wass_dist:.4f}', horizontalalignment='center', verticalalignment='center', transform=ax.transAxes, fontsize=16)
-    return wass_dist
+    ax.text(0.5, 0.925, f'{label}: {wass_dist:.4f}', horizontalalignment='center', verticalalignment='center', transform=ax.transAxes, fontsize=16)
 
 def get_distance_by_name(traj,n1,n2):
     if isinstance(traj,list):

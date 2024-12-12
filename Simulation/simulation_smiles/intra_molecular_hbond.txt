@@ -1,0 +1,15 @@
+c1ccc2c(c1)C(=O)c3cccc(c3C2=O)NCCO
+c1ccc(c(c1)C=O)O
+CC(=O)Oc1ccccc1C(=O)O
+CCCc1ccc(c(c1)OC)O
+COc1ccccc1O
+c1ccc2c(c1)C(=O)c3c(ccc(c3C2=O)O)N
+CCCOCCO
+COc1c(ccc(c1C(=O)O)Cl)Cl
+COCCO
+CCCCOCCO
+Cc1ccc(c(c1)OC)O
+c1cc(c(cc1c2ccc(cc2F)F)C(=O)O)O
+COCCN
+CCCCOC[C@H](C)O
+CCOCCO

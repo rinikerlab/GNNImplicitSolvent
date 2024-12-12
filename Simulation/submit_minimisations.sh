@@ -1,0 +1,8 @@
+sbatch --array=0-9 -n 8 --gpus=rtx_4090:1 --time=120:00:00  --mem-per-cpu=4000 -o Minimizations/Platinum_analysis_log/log_%A_%a.out --wrap='python run_platinum_analysis.py -nc 8 -i $SLURM_ARRAY_TASK_ID -mf /cluster/work/igc/kpaul/projects/small_molecule_multisolvent/MachineLearning/trained_models/ProductionRun_seed_1612_49_ckpt.pt'
+
+# Some Minimizations required additional memory
+sbatch --array=5,6,8 -n 8 --gpus=rtx_4090:1 --time=120:00:00  --mem-per-cpu=8000 -o Minimizations/Platinum_analysis_log/log_mm_%A_%a.out --wrap='python run_platinum_analysis.py -nc 8 -i $SLURM_ARRAY_TASK_ID -mf /cluster/work/igc/kpaul/projects/small_molecule_multisolvent/MachineLearning/trained_models/ProductionRun_seed_1612_49_ckpt.pt'
+
+sbatch --array=0-21 -n 8 --gpus=rtx_3090:1 --time=24:00:00  --mem-per-cpu=8000 -o Minimizations/MB_analysis_log/log_%A_%a.out --wrap='python run_MB_analysis.py -i $SLURM_ARRAY_TASK_ID -mf /cluster/work/igc/kpaul/projects/small_molecule_multisolvent/MachineLearning/trained_models/ProductionRun_seed_1612_49_ckpt.pt -c 0.075'
+sbatch --array=0-4 -n 8 --gpus=rtx_3090:1 --time=24:00:00  --mem-per-cpu=8000 -o Minimizations/Conformational_analysis_log/log_%A_%a.out --wrap='python run_conformational_ensemble.py -nc 8 -i $SLURM_ARRAY_TASK_ID -mf /cluster/work/igc/kpaul/projects/small_molecule_multisolvent/MachineLearning/trained_models/ProductionRun_seed_1612_49_ckpt.pt -c 0.075'
+sbatch --array=8 -n 8 --gpus=rtx_4090:1 --time=120:00:00  --mem-per-cpu=16000 -o Minimizations/Platinum_analysis_log/log_mm_%A_%a.out --wrap='python run_platinum_analysis.py -nc 8 -i $SLURM_ARRAY_TASK_ID -mf /cluster/work/igc/kpaul/projects/small_molecule_multisolvent/MachineLearning/trained_models/ProductionRun_seed_1612_49_ckpt.pt'

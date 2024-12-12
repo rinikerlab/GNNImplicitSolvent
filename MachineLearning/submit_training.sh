@@ -1,0 +1,1 @@
+sbatch --array=1611,1612,1613 --time=180:00:00 --gpus=rtx_4090:1  -n 8 --mem-per-cpu=8000 --tmp=32000 -o train_logs/train_model_production_%A_r%a.out --wrap='python train_model_multisolvent.py -c train_config.yml -s $SLURM_ARRAY_TASK_ID'

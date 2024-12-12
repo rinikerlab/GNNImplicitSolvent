@@ -1,0 +1,2 @@
+CN[C@@H](C)[C@H](O)c1ccccc1
+NC[C@H](O)c1ccc(O)c(O)c1
