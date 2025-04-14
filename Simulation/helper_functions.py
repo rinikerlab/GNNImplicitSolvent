@@ -1164,7 +1164,7 @@ def get_gnn_sim(
             constraints=constraints,
         )
     else:
-        model_dict = torch.load(model_path)["model"]
+        model_dict = torch.load(model_path,map_location="cpu")["model"]
         gnn_sim = create_gnn_sim(
             smiles,
             cache=cache,
