@@ -38,6 +38,7 @@ from ForceField.Forcefield import (
     OpenFF_forcefield_vacuum,
     OpenFF_forcefield_SAGBNeck2,
     OpenFF_TIP5P_forcefield,
+    OpenFF_forcefield_OBC,
 )
 import yaml
 from openmm import LangevinMiddleIntegrator, MonteCarloBarostat
@@ -49,6 +50,7 @@ import os
 forcefield_dict = DefaultDict(lambda: OpenFF_forcefield)
 forcefield_dict["SAGBNeck2"] = OpenFF_forcefield_SAGBNeck2
 forcefield_dict["GBNeck2"] = OpenFF_forcefield_GBNeck2
+forcefield_dict["OBC"] = OpenFF_forcefield_OBC
 forcefield_dict["vac"] = OpenFF_forcefield_vacuum
 forcefield_dict["TIP5P"] = OpenFF_TIP5P_forcefield
 
@@ -59,7 +61,7 @@ solvent_dict = yaml.load(open(args.solvent_yaml), Loader=yaml.FullLoader)[
 
 def solvent_model_dict(x):
 
-    if x in ["GBNeck2", "vac", "SAGBNeck2"]:
+    if x in ["GBNeck2", "vac", "SAGBNeck2", "OBC"]:
         return "v"
     if x in solvent_dict.keys():
         return solvent_dict[x]["SMILES"]
@@ -92,6 +94,18 @@ sim = Simulator(
     random_number_seed=args.random,
 )
 if args.solvent == "GBNeck2":
+    sim.forcefield = forcefield_dict[args.solvent](
+        pdb_id,
+        solvent_dielectric=args.solvent_dielectric,
+        cache="run_caches/" + save_name + ".cache",
+    )
+elif args.solvent == "OBC":
+    sim.forcefield = forcefield_dict[args.solvent](
+        pdb_id,
+        solvent_dielectric=args.solvent_dielectric,
+        cache="run_caches/" + save_name + ".cache",
+    )
+elif args.solvent == "SAGBNeck2":
     sim.forcefield = forcefield_dict[args.solvent](
         pdb_id,
         solvent_dielectric=args.solvent_dielectric,

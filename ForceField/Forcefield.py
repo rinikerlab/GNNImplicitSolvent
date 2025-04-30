@@ -301,6 +301,87 @@ class OpenFF_forcefield_GBNeck2(OpenFF_forcefield):
         self._Data = Data
 
 
+class OpenFF_forcefield_OBC(OpenFF_forcefield):
+
+    def __init__(
+        self,
+        pdb_id,
+        solvent_model="TIP3P",
+        SA=None,
+        cache=None,
+        solvent_dielectric=78.5,
+        rdkit_mol=None,
+        partial_charges=None,
+        forcefield="openff-2.0.0",
+        constraints=HBonds,
+    ):
+        super().__init__(
+            pdb_id,
+            solvent_model,
+            cache=cache,
+            rdkit_mol=rdkit_mol,
+            partial_charges=partial_charges,
+            forcefield=forcefield,
+            constraints=constraints,
+        )
+        self._SA = SA
+        self._solvent_dielectric = solvent_dielectric
+
+    def create_system(
+        self, topology, nonbondedMethod=PME, nonbondedCutoff=1 * nanometer
+    ):
+
+        system = self._openmm_forcefield.createSystem(
+            topology=topology, nonbondedMethod=NoCutoff, constraints=HBonds
+        )
+        charges = np.array(
+            [
+                system.getForces()[0].getParticleParameters(i)[0]._value
+                for i in range(topology._numAtoms)
+            ]
+        )
+
+        force = GBSAOBC2Force(
+            cutoff=None,
+            SA=self._SA,
+            soluteDielectric=1,
+            solventDielectric=self._solvent_dielectric,
+        )
+        obc_parameters = np.empty((topology.getNumAtoms(), 3))
+        obc_parameters[:, 0] = charges  # Charges
+        obc_parameters[:, 1:] = force.getStandardParameters(
+            topology
+        )  # GBNeck2 parameters
+
+        self._Data = obc_parameters
+        # Add Particles and finalize force
+        force.addParticles(obc_parameters)
+        force.finalize()
+
+        # Create System and add force
+        system.addForce(force)
+
+        return system
+
+    def __str__(self):
+        if self._SA is None:
+            return "openff200_OBC_%.1f" % self._solvent_dielectric
+        else:
+            return "openff200_SAOBC_%.1f" % self._solvent_dielectric
+
+    @property
+    def water_model(self):
+        return "implicit"
+
+    @property
+    def Data(self):
+        return self._Data
+
+    @Data.setter
+    def Data(self, Data):
+        self._Data = Data
+
+
 class OpenFF_forcefield_SAGBNeck2(OpenFF_forcefield_GBNeck2):
 
     def __init__(self, pdb_id, solvent_model="TIP3P", SA="ACE", cache=None):
