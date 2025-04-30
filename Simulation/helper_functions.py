@@ -450,6 +450,7 @@ def create_vac_sim(
         save_name=save_name,
         openff_forcefield=forcefield,
         constraints=constraints,
+        rdkit_mol=mol,
     )
     vac_sim.forcefield = OpenFF_forcefield_vacuum(
         pdb_id,
@@ -1164,7 +1165,7 @@ def get_gnn_sim(
             constraints=constraints,
         )
     else:
-        model_dict = torch.load(model_path)["model"]
+        model_dict = torch.load(model_path, map_location="cpu")["model"]
         gnn_sim = create_gnn_sim(
             smiles,
             cache=cache,

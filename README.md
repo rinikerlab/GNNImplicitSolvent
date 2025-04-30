@@ -2,14 +2,14 @@
 
 ## Publications
 
-[3] ChemRxiv. 2024; DOI: [https://doi.org/10.26434/chemrxiv-2024-1hb0b](https://doi.org/10.26434/chemrxiv-2024-1hb0b)
+[3] _J. Am. Chem. Soc._, **2025**, DOI: [https://doi.org/10.1021/jacs.4c17622](https://doi.org/10.1021/jacs.4c17622)
 
-[2] Chem. Sci., 2024, DOI: [https://doi.org/10.1039/D4SC02432J](https://doi.org/10.1039/D4SC02432J)
+[2] _Chem. Sci._, **2024**, DOI: [https://doi.org/10.1039/D4SC02432J](https://doi.org/10.1039/D4SC02432J)
 
-[1] J. Chem. Phys. 158, 204101 (2023), DOI: [https://doi.org/10.1063/5.0147027](https://doi.org/10.1063/5.0147027)
+[1] _J. Chem. Phys._, **2023**, DOI: [https://doi.org/10.1063/5.0147027](https://doi.org/10.1063/5.0147027)
 
 ## Abstract
-[3] Understanding and manipulating the conformational behavior of a molecule in different solvent environments is of great interest in the fields of drug discovery and organic synthesis. Molecular dynamics (MD) simulations with solvent molecules explicitly present are the gold standard to compute such conformational ensembles (within the accuracy of the underlying force field), complementing experimental findings and supporting their interpretation. However, conventional methods often face challenges related to computational cost (explicit solvent) or accuracy (implicit solvent). Here, we showcase how our graph neural network (GNN)-based implicit solvent (GNNIS) approach can be used to rapidly compute small molecule conformational ensembles in 39 common organic solvents with high accuracy compared to explicit-solvent simulations. We validate this approach using nuclear magnetic resonance (NMR) measurements, thus identifying the conformers contributing most to the experimental observable. The method allows the time required to accurately predict conformational ensembles to be reduced from days to minutes while achieving results within one kBT of the experimental values.
+[3] Understanding and manipulating the conformational behavior of a molecule in different solvent environments is of great interest in the fields of drug discovery and organic synthesis. Molecular dynamics (MD) simulations with solvent molecules explicitly present are the gold standard to compute such conformational ensembles (within the accuracy of the underlying force field), complementing experimental findings and supporting their interpretation. However, conventional methods often face challenges related to computational cost (explicit solvent) or accuracy (implicit solvent). Here, we showcase how our graph neural network (GNN)-based implicit solvent (GNNIS) approach can be used to rapidly compute small molecule conformational ensembles in 39 common organic solvents reproducing explicit-solvent simulations with high accuracy. We validate this approach using nuclear magnetic resonance (NMR) measurements, thus identifying the conformers contributing most to the experimental observable. The method allows the time required to accurately predict conformational ensembles to be reduced from days to minutes while achieving results within one kBT of the experimental values.
 
 [2] The dynamical behavior of small molecules in their environment can be studied with classical molecular dynamics (MD) simulations to gain deeper insight on an atomic level and thus complement and rationalize the interpretation of experimental findings. Such approaches are of great value in various areas of research, e.g., in the development of new therapeutics. The accurate description of solvation effects in such simulations is thereby key and has in consequence been an active field of research since the introduction of MD. So far, the most accurate approaches involve computationally expensive explicit solvent simulations, while widely applied models using an implicit solvent description suffer from reduced accuracy. Recently, machine learning (ML) approaches that provide a probabilistic representation of solvation effects have been proposed as potential alternatives. However, the associated computational costs and minimal or lack of transferability render them unusable in practice. Here, we report the first example of a transferable ML-based implicit solvent model trained on a diverse set of 3 000 000 molecular structures that can be applied to organic small molecules for simulations in water. Extensive testing against reference calculations demonstrated that the model delivers on par accuracy with explicit solvent simulations while providing an up to 18-fold increase in sampling rate.
 
@@ -26,7 +26,7 @@
 
 ## Installation
 
-First clone this repository to your work station and install the environmentusing conda or mamba:
+First clone this repository to your work station and install the environment using conda or mamba:
 
 ```bash
 mamba env create -f environment.yml
@@ -57,7 +57,7 @@ from rdkit.Chem import AllChem
 
 mol = Chem.MolFromSmiles('COCCO')
 mol = Chem.AddHs(mol)
-AllChem.EmbedMultipleConfs(mol, numConfs=128)
+AllChem.EmbedMultipleConfs(mol, numConfs=128, useExpTorsionAnglePrefs = False)
 
 minimized_mol, energies = minimize_mol(mol,"DMSO")
 entropies, free_energies = calculate_entropy(minimized_mol,"DMSO")
@@ -68,6 +68,7 @@ In addition an example workflow is provided in the [ExampleConformationEnsemble.
 ## Reproducibility
 
 This section is intended to provide a step-by-step guide to reproduce the results of the paper.
+For the exact versions of the packages used in this study please refer to the [reproduction_environment.yml](reproduction_environment.yml) file.
 
 ### Data Set Generation
 

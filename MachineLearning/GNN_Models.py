@@ -787,7 +787,7 @@ class GNN3_Multisolvent_embedding_run_multiple(GNN3_Multisolvent_embedding):
             # Encode solvent
 
         # Get Graph
-        if positions.device != self._device:
+        if positions.device != torch.device("cuda"):
             positions = positions.float().to(self._device)
         
         # Build Graph
