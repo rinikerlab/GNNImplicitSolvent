@@ -1,4 +1,4 @@
-name: GNNImplicitSolvent_run
+name: GNNImplicitSolvent
 channels:
   - conda-forge
 dependencies:
